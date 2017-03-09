@@ -1,0 +1,19 @@
+.contextMenu .menuItem:hover {
+    fill: #00FF00;
+}
+
+.contextMenu .option1 {
+    fill: #98abc5;
+}
+
+.contextMenu .option2 {
+    fill: #8a89a6;
+}
+
+.contextMenu .option3 {
+    fill: #7b6888;
+}
+
+.contextMenu .option4 {
+    fill: #6b486b;
+}
