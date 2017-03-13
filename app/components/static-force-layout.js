@@ -19,38 +19,43 @@ export default Ember.Component.extend({
     didInsertElement: function() {
       this.updateGraphData();
       this.setupGraph();
-      this.redraw();
     },
 
     // observes changes to either data nodes or data links
     onDataChanged: function() {
+      this.tearDownGraph();
       this.updateGraphData();
-      this.redraw();
+      this.setupGraph();
     }.observes('data.nodes', 'data.links'),
 
     // creates the view for the rendered visualization,
     // also creates rendered entities, and computational model
     setupGraph: function() {
-      this.svg = d3.select('svg#graph')
-         .attr('width', this.get('width'))
-         .attr('height', this.get('height'));
-
-      this.link = this.svg.append('g').selectAll(".link");
-      this.node = this.svg.append('g').selectAll(".node");
 
       this.simulation = d3.forceSimulation()
         .force('link', d3.forceLink().id(d => d.id))
         .force('charge', d3.forceManyBody().strength(-80))
         .force('center', d3.forceCenter(this.width / 2, this.height / 2))
-        // .force("x", d3.forceX())
-        // .force("y", d3.forceY())
-        .force('collision', d3.forceCollide(10));
+        .stop();
 
-      this.simulation.nodes(this._nodes)
-        .on('tick', this.ticked.bind(this));
+      this.simulation.nodes(this._nodes);
 
       this.simulation.force('link')
           .links(this._links);
+
+      // move to bottom of call stack to allow other work to take priority
+      // eventually will want to compute the initial force simulation in a webworker
+      // on a separate thread so as not to hang the page
+      setTimeout(() => {
+          for (var i = 0, n = Math.ceil(Math.log(this.simulation.alphaMin()) / Math.log(1 - this.simulation.alphaDecay())); i < n; ++i) {
+            this.simulation.tick();
+          }
+          this.redraw();
+      }, 0);
+    },
+
+    tearDownGraph: function() {
+        this.svg.selectAll('g').remove();
     },
 
     // mutates local state to match that of immutable parent state.
@@ -98,40 +103,35 @@ export default Ember.Component.extend({
     },
 
     redraw: function() {
-      this.link = this.link.data(this._links);
-      this.link.exit().remove();
-      this.link = this.link.enter().append('line')
-        .attr('stroke', '#000000')
-        .attr('stroke-width', 1)
-        .merge(this.link);
+        this.svg = d3.select('svg#graph')
+           .attr('width', this.get('width'))
+           .attr('height', this.get('height'));
 
-      this.node = this.node.data(this._nodes);
-      this.node.exit().remove();
-      this.node = this.node.enter().append('circle')
-        .attr('r', d => d.r)
-        .attr('fill', () => {
-            return '#ABABAB';
-        })
-        .attr('id', d => d.id)
-        .attr('cx', 1000)
-        .attr('cy', 1000)
-        .merge(this.node);
-
-      this.simulation.nodes(this._nodes);
-      this.simulation.force('link').links(this._links);
-      this.simulation.alpha(1).restart();
-    },
-
-    ticked: function() {
-        this.link
+        this.link = this.svg.append('g').selectAll(".link");
+        this.node = this.svg.append('g').selectAll(".node");
+        this.link = this.link.data(this._links);
+        this.link.exit().remove();
+        this.link = this.link.enter().append('line')
+            .attr('stroke', '#000000')
+            .attr('stroke-width', 1)
             .attr('x1', d => d.source.x)
             .attr('y1', d => d.source.y)
             .attr('x2', d => d.target.x)
-            .attr('y2', d => d.target.y);
+            .attr('y2', d => d.target.y)
+            .merge(this.link);
 
-        this.node
+        this.node = this.node.data(this._nodes);
+        this.node.exit().remove();
+        this.node = this.node.enter().append('circle')
+            .attr('r', d => d.r)
+            .attr('fill', () => {
+                return '#ABABAB';
+            })
+            .attr('id', d => d.id)
             .attr('cx', d => d.x)
-            .attr('cy', d => d.y);
+            .attr('cy', d => d.y)
+            .attr('r', 10)
+            .merge(this.node);
     },
 
     actions: {
