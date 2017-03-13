@@ -1,122 +1,144 @@
 import Ember from 'ember';
 
 export default Ember.Component.extend({
+    // properties of the component
+    width: 1000,
+    height: 1000,
 
+    // link and node data passed in from parent
     data: null,
 
+    // for convenience, used to map nodes by name for easy lookup
+    _nodeMap: {},
+
+    // mutable arrays required for d3 magic
+    _links: [],
+    _nodes: [],
+
+    // initial setup
     didInsertElement: function() {
-        Ember.run.scheduleOnce('afterRender', this, function() {
-            const WIDTH = 1000,
-                HEIGHT = 1000;
+      this.updateGraphData();
+      this.setupGraph();
+      this.redraw();
+    },
 
-            const data = this.get('data');
-            const links = data.links;
-            const nodes = data.nodes.map(node => ({ ...node, r: 10}));
+    // observes changes to either data nodes or data links
+    onDataChanged: function() {
+      this.updateGraphData();
+      this.redraw();
+    }.observes('data.nodes', 'data.links'),
 
-            const color = d3.scaleOrdinal(d3.schemeCategory20);
+    // creates the view for the rendered visualization,
+    // also creates rendered entities, and computational model
+    setupGraph: function() {
+      this.svg = d3.select('svg#graph')
+         .attr('width', this.get('width'))
+         .attr('height', this.get('height'));
 
-            const svg = d3.select("svg#graph")
-              .attr("width", WIDTH)
-              .attr("height", HEIGHT)
-              .on('click', clearContextMenu);
+      this.link = this.svg.append('g').selectAll(".link");
+      this.node = this.svg.append('g').selectAll(".node");
 
-            const link = svg.append('g')
-                .attr('class', 'links')
-                .selectAll('line')
-                .data(links)
-                .enter().append('line')
-                    .attr('stroke', '#000000')
-                    .attr('stroke-width', 1);
+      this.simulation = d3.forceSimulation()
+        .force('link', d3.forceLink().id(d => d.id))
+        .force('charge', d3.forceManyBody().strength(-80))
+        .force('center', d3.forceCenter(this.width / 2, this.height / 2))
+        // .force("x", d3.forceX())
+        // .force("y", d3.forceY())
+        .force('collision', d3.forceCollide(10));
 
-            const node = svg.append('g')
-                .attr('class', 'nodes')
-                .selectAll('circle')
-                .data(nodes)
-                .enter().append('circle')
-                    .attr('r', d => d.r)
-                    .attr('fill', () => {
-                        return '#ABABAB';
-                    })
-                    .on('click', nodeClicked);
+      this.simulation.nodes(this._nodes)
+        .on('tick', this.ticked.bind(this));
 
-            node.append('title')
-                .text(d => d.id);
+      this.simulation.force('link')
+          .links(this._links);
+    },
 
-            const simulation = d3.forceSimulation()
-                .force('link', d3.forceLink().id(d => d.id))
-                .force('charge', d3.forceManyBody().strength(-80))
-                .force('center', d3.forceCenter(WIDTH / 2, HEIGHT / 2));
+    // mutates local state to match that of immutable parent state.
+    // d3 mutates data, so we need to sync local link and node lists with
+    // our application data so that d3 can perform it's mutations without touching
+    // the original
+    updateGraphData: function() {
+      const latestNodes = this.get('data.nodes');
+      const latestLinks = this.get('data.links');
 
-            simulation
-                .nodes(nodes)
-                .on('tick', ticked.bind(null, link, node));
+      // used for tracking new nodes
+      let retain = {};
 
-            simulation.force('link')
-                .links(links);
+      // add nodes that aren't found in old data
+      latestNodes.forEach((n, i) => {
+        retain[n.id] = true;
 
-            function nodeClicked(node) {
-                // clean up
-                clearContextMenu();
+        if (!(n.id in this._nodeMap)) {
+          const newNode = { id: n.id, r: 10, x: 500, y: 500 };
+          this._nodes.push(newNode);
+          this._nodeMap[n.id] = newNode;
+        }
+      });
 
-                // build context menu
-                d3.select(this)
-                    .attr('r', 30);
+      // delete nodes that no longer are found in new data
+      this._nodes.forEach((n, i) => {
+        if (!(n.id in retain)) {
+          delete this._nodeMap[n.id];
+          this._nodes.splice(i, 1);
+        }
+      });
 
-                const contextMenuData = [
-                    { name: 'option1', action: 'clickOption1' },
-                    { name: 'option2', action: 'clickOption2' },
-                    { name: 'option3', action: 'clickOption3' },
-                    { name: 'option4', action: 'clickOption4' }
-                ];
-                const contextMenu = d3.pie()
-                    .value(1);
+      // just return the links straight up
+      let linksCopy = [];
+      for (let i = 0; i < latestLinks.length; i++) {
+        let link = latestLinks[i];
+        const newLink = {
+          source: this._nodeMap[link.source],
+          target: this._nodeMap[link.target]
+        };
+        linksCopy.push(newLink);
+      }
 
-                const contextMenuPath = d3.arc()
-                    .outerRadius(60)
-                    .innerRadius(30);
+      this._links = linksCopy;
+    },
 
-                const arc = svg.append('g')
-                    .attr('class', 'contextMenu')
-                    .attr('transform', `translate(${node.x}, ${node.y})`)
-                    .selectAll('.menuItem')
-                        .data(contextMenu(contextMenuData))
-                        .enter().append('g')
-                            .attr('class', d => `menuItem ${d.data.name}`)
-                            .on('click', d => {
-                                clickedOption(d.data, node);
-                            });
+    redraw: function() {
+      // this.simulation.stop();
 
-                arc.append('path')
-                    .attr('class', 'path')
-                    .attr('d', contextMenuPath)
+      this.link = this.link.data(this._links);
+      this.link.exit().remove();
+      this.link = this.link.enter().append('line')
+        .attr('stroke', '#000000')
+        .attr('stroke-width', 1)
+        .merge(this.link);
 
-                d3.event.stopPropagation();
-            }
+      this.node = this.node.data(this._nodes);
+      this.node.exit().remove();
+      this.node = this.node.enter().append('circle')
+        .attr('r', d => d.r)
+        .attr('fill', () => {
+            return '#ABABAB';
+        })
+        .attr('id', d => d.id)
+        .attr('cx', 1000)
+        .attr('cy', 1000)
+        .merge(this.node);
 
-            function ticked(link, node) {
-                link
-                    .attr('x1', d => d.source.x)
-                    .attr('y1', d => d.source.y)
-                    .attr('x2', d => d.target.x)
-                    .attr('y2', d => d.target.y);
+      this.simulation.nodes(this._nodes);
+      this.simulation.force('link').links(this._links);
+      this.simulation.alpha(1).restart();
+    },
 
-                node
-                    .attr('cx', d => d.x)
-                    .attr('cy', d => d.y);
-            };
+    ticked: function() {
+        this.link
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
 
-            function clearContextMenu() {
-                d3.selectAll('circle')
-                    .attr('r', 10);
-                d3.selectAll('.contextMenu')
-                    .remove();
-            }
+        this.node
+            .attr('cx', d => d.x)
+            .attr('cy', d => d.y);
+    },
 
-            const clickedOption = (menuOption, node) => {
-                this.sendAction(menuOption.action, node);
-                d3.event.stopPropagation();
-            };
-
-        });
+    actions: {
+      mutate: function() {
+        this.sendAction('mutate');
+      }
     }
 });
