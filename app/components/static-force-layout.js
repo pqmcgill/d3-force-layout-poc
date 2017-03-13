@@ -4,6 +4,7 @@ export default Ember.Component.extend({
     // properties of the component
     width: 1000,
     height: 1000,
+    scale: 1,
 
     isLoading: true,
 
@@ -36,11 +37,10 @@ export default Ember.Component.extend({
 
       this.simulation = d3.forceSimulation()
         .force('link', d3.forceLink().id(d => d.id))
-        .force('charge', d3.forceManyBody().strength(-80))
-        .force('center', d3.forceCenter(this.width / 2, this.height / 2))
-        // .stop();
+        .force('charge', d3.forceManyBody().strength(-400))
+        .force('center', d3.forceCenter(this.width / 2, this.height / 2));
 
-      this.simulation.nodes(this._nodes);
+      this.simulation.nodes(this._nodes)
 
       this.simulation.force('link')
           .links(this._links);
@@ -79,7 +79,10 @@ export default Ember.Component.extend({
         retain[n.id] = true;
 
         if (!(n.id in this._nodeMap)) {
-          const newNode = { id: n.id, r: 10, x: 500, y: 500 };
+          const newNode = {
+              id: n.id,
+              r: 10
+          };
           this._nodes.push(newNode);
           this._nodeMap[n.id] = newNode;
         }
@@ -108,22 +111,50 @@ export default Ember.Component.extend({
     },
 
     redraw: function() {
+        const self = this;
+        const margin = { top: 0, right: 0, bottom: 0, left: 0 };
+        this.zoom = d3.zoom()
+            .scaleExtent([-100, 100])
+            .on('zoom', function() {
+                self.onZoom(self);
+            });
+
         this.svg = d3.select('svg#graph')
            .attr('width', this.get('width'))
-           .attr('height', this.get('height'));
+           .attr('height', this.get('height'))
+            .call(this.zoom)
+                .append('g');
 
         this.link = this.svg.append('g').selectAll(".link");
         this.node = this.svg.append('g').selectAll(".node");
-        this.link = this.link.data(this._links);
+
+        const linkMap = this._links.map(link => ({ source: link.source.id, target: link.target.id }));
+
+        const forceBundle = d3.ForceEdgeBundling()
+            .nodes(this._nodeMap)
+            .edges(linkMap)
+            .bundling_stiffness(0.1)
+            .compatibility_threshold(0.1);
+
+        const forceBundledLinks = forceBundle();
+
+        const line = d3.line()
+            .x(d => d.x)
+            .y(d => d.y)
+            .curve(d3.curveLinear);
+
+        this.link = this.link.data(forceBundledLinks);
         this.link.exit().remove();
-        this.link = this.link.enter().append('line')
+        this.link = this.link.enter().append('path')
             .attr('id', (d, i) => `link-${i}`)
-            .attr('stroke', '#000000')
+            .attr('class', 'edge')
+            .attr('fill', 'none')
+            .attr('stroke', '#72CF1D')
+            .attr('stroke-opacity', 0.3)
             .attr('stroke-width', 1)
-            .attr('x1', d => d.source.x)
-            .attr('y1', d => d.source.y)
-            .attr('x2', d => d.target.x)
-            .attr('y2', d => d.target.y)
+            .attr('d', (d, i) => {
+                return line(forceBundledLinks[i]);
+            })
             .on('mouseover', this.onLinkMouseOver.bind(this))
             .on('mouseout', this.onLinkMouseOut.bind(this))
             .merge(this.link);
@@ -138,7 +169,7 @@ export default Ember.Component.extend({
             .attr('id', d => d.id)
             .attr('cx', d => d.x)
             .attr('cy', d => d.y)
-            .attr('r', 10)
+            .attr('r', 5)
             .on('mouseover', this.onNodeMouseOver.bind(this))
             .on('mouseout', this.onNodeMouseOut.bind(this))
             .merge(this.node);
@@ -153,7 +184,7 @@ export default Ember.Component.extend({
         this.resetStyledRelationships();
     },
 
-    onLinkMouseOver: function(d) {
+    onLinkMouseOver: function(d, i) {
         this.highlightRelationships({
             nodes: [ d.source, d.target ],
             links: [ d ]
@@ -164,37 +195,45 @@ export default Ember.Component.extend({
         this.resetStyledRelationships();
     },
 
+    onZoom: function(context) {
+        const { x, y, k } = d3.event.transform;
+        context.scale = k;
+        context.svg.attr('transform', `translate(${x},${y}) scale(${k})`);
+        context.link
+            .attr('stroke-width', 1 / k);
+
+        context.node
+            .attr('r', 5 / k);
+    },
+
     // highlight the node that was clicked as well as those nodes that are
     // directly linked to it
     highlightRelationships: function(linkedRelationships) {
         const { links, nodes } = linkedRelationships
         d3.selectAll('circle')
-            .attr('fill', '#D5D5D5')
-
-        d3.selectAll('line')
-            .attr('stroke', '#ABABAB');
+            .attr('fill', '#D5D5D5');
 
         nodes.forEach(node => {
             d3.select(`#${node.id}`)
-                .attr('fill', '#FF0000')
+                .attr('fill', '#72CF1D');
         });
 
         links.forEach(link => {
             d3.select(`#link-${link.index}`)
-                .attr('stroke', '#FF0000')
-                .attr('stroke-width', 2)
+                .attr('stroke', '#72CF1D')
+                .attr('stroke-opacity', 1)
+                .attr('stroke-width', 2 / this.scale);
         });
     },
 
     resetStyledRelationships: function() {
         d3.selectAll('circle')
-            .attr('fill', '#ABABAB')
-            .attr('opacity', 1);
+            .attr('fill', '#ABABAB');
 
-        d3.selectAll('line')
-            .attr('stroke', '#000000')
-            .attr('stroke-width', 1)
-            .attr('opacity', 1);
+        d3.selectAll('.edge')
+            .attr('stroke', '#72CF1D')
+            .attr('stroke-opacity', 0.3)
+            .attr('stroke-width', 1 / this.scale);
     },
 
     // return array of directly linked nodes given a particular node

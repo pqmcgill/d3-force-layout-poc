@@ -12,6 +12,7 @@
     "jquery": "1.11.3",
     "loader.js": "ember-cli/loader.js#3.4.0",
     "qunit": "~1.20.0",
-    "d3": "^4.7.1"
+    "d3": "^4.7.1",
+    "forceBundle": "git://github.com/upphiminn/d3.ForceBundle.git"
   }
 }
