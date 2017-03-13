@@ -1,2 +1,6 @@
 <svg id="graph"></svg>
+{{#if isLoading}}
+  Please wait while the simulation loads
+{{else}}
 <button {{action 'mutate'}}>mutate</button>
+{{/if}}

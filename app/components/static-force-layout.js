@@ -5,6 +5,8 @@ export default Ember.Component.extend({
     width: 1000,
     height: 1000,
 
+    isLoading: true,
+
     // link and node data passed in from parent
     data: null,
 
@@ -36,7 +38,7 @@ export default Ember.Component.extend({
         .force('link', d3.forceLink().id(d => d.id))
         .force('charge', d3.forceManyBody().strength(-80))
         .force('center', d3.forceCenter(this.width / 2, this.height / 2))
-        .stop();
+        // .stop();
 
       this.simulation.nodes(this._nodes);
 
@@ -47,10 +49,13 @@ export default Ember.Component.extend({
       // eventually will want to compute the initial force simulation in a webworker
       // on a separate thread so as not to hang the page
       setTimeout(() => {
-          for (var i = 0, n = Math.ceil(Math.log(this.simulation.alphaMin()) / Math.log(1 - this.simulation.alphaDecay())); i < n; ++i) {
+          const steps = Math.ceil(Math.log(this.simulation.alphaMin()) / Math.log(1 - this.simulation.alphaDecay()));
+          for (var i = 0, n = steps; i < n; ++i) {
             this.simulation.tick();
           }
+          this.set('isLoading', false);
           this.redraw();
+          this.simulation.restart();
       }, 0);
     },
 
@@ -112,12 +117,15 @@ export default Ember.Component.extend({
         this.link = this.link.data(this._links);
         this.link.exit().remove();
         this.link = this.link.enter().append('line')
+            .attr('id', (d, i) => `link-${i}`)
             .attr('stroke', '#000000')
             .attr('stroke-width', 1)
             .attr('x1', d => d.source.x)
             .attr('y1', d => d.source.y)
             .attr('x2', d => d.target.x)
             .attr('y2', d => d.target.y)
+            .on('mouseover', this.onLinkMouseOver.bind(this))
+            .on('mouseout', this.onLinkMouseOut.bind(this))
             .merge(this.link);
 
         this.node = this.node.data(this._nodes);
@@ -131,7 +139,81 @@ export default Ember.Component.extend({
             .attr('cx', d => d.x)
             .attr('cy', d => d.y)
             .attr('r', 10)
+            .on('mouseover', this.onNodeMouseOver.bind(this))
+            .on('mouseout', this.onNodeMouseOut.bind(this))
             .merge(this.node);
+    },
+
+    onNodeMouseOver: function(d) {
+        const linkedRelationships = this.findLinkedRelationships(d);
+        this.highlightRelationships(linkedRelationships);
+    },
+
+    onNodeMouseOut: function() {
+        this.resetStyledRelationships();
+    },
+
+    onLinkMouseOver: function(d) {
+        this.highlightRelationships({
+            nodes: [ d.source, d.target ],
+            links: [ d ]
+        });
+    },
+
+    onLinkMouseOut: function() {
+        this.resetStyledRelationships();
+    },
+
+    // highlight the node that was clicked as well as those nodes that are
+    // directly linked to it
+    highlightRelationships: function(linkedRelationships) {
+        const { links, nodes } = linkedRelationships
+        d3.selectAll('circle')
+            .attr('fill', '#D5D5D5')
+
+        d3.selectAll('line')
+            .attr('stroke', '#ABABAB');
+
+        nodes.forEach(node => {
+            d3.select(`#${node.id}`)
+                .attr('fill', '#FF0000')
+        });
+
+        links.forEach(link => {
+            d3.select(`#link-${link.index}`)
+                .attr('stroke', '#FF0000')
+                .attr('stroke-width', 2)
+        });
+    },
+
+    resetStyledRelationships: function() {
+        d3.selectAll('circle')
+            .attr('fill', '#ABABAB')
+            .attr('opacity', 1);
+
+        d3.selectAll('line')
+            .attr('stroke', '#000000')
+            .attr('stroke-width', 1)
+            .attr('opacity', 1);
+    },
+
+    // return array of directly linked nodes given a particular node
+    findLinkedRelationships: function(node) {
+        return this._links.reduce((acc, link) => {
+            if (link.source.id === node.id) {
+                acc = {
+                    links: [ ...acc.links, link ],
+                    nodes: [ ...acc.nodes, link.target ]
+                };
+            }
+            if (link.target.id === node.id) {
+                acc = {
+                    links: [ ...acc.links, link ],
+                    nodes: [ ...acc.nodes, link.source ]
+                };
+            }
+            return acc;
+        }, { nodes: [node], links: []});
     },
 
     actions: {
